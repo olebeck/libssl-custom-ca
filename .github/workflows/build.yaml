@@ -1,0 +1,71 @@
+name: CMake Build and Release
+
+on:
+  push:
+    branches:
+      - master
+    tags:
+      v*
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          submodules: true
+      
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y cmake xz-utils
+    
+      - name: Vitasdk
+        run: |
+          git clone https://github.com/vitasdk/vdpm
+          cd vdpm
+          ./bootstrap-vitasdk.sh
+          export VITASDK=/usr/local/vitasdk
+          export PATH=$PATH:$VITASDK/bin
+          echo "VITASDK=${VITASDK}" >> $GITHUB_ENV
+          echo "PATH=${PATH}" >> $GITHUB_ENV
+
+      - name: get stai
+        run: |
+          wget https://github.com/olebeck/stai/releases/download/v0.9.0/stai-0.0.1-1-vita.pkg.tar.xz
+          vdpm pacman --noconfirm -U ./stai-0.0.1-1-vita.pkg.tar.xz
+
+      - name: Build
+        run: |
+          cmake -Bbuild -S . -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release --target all
+
+      - name: Determine release tag
+        id: set_tag
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            echo "release_tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            echo "is_prerelease=false" >> $GITHUB_OUTPUT
+          else
+            short_sha=$(echo "${{ github.sha }}" | cut -c1-7)
+            echo "release_tag=prerelease-${short_sha}" >> $GITHUB_OUTPUT
+            echo "is_prerelease=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.set_tag.outputs.release_tag }}
+          name: ${{ steps.set_tag.outputs.release_tag }}
+          body: |
+            Build from ${{ github.sha }}
+          draft: false
+          prerelease: ${{ steps.set_tag.outputs.is_prerelease }}
+          files: |
+            build/libssl-custom-ca.suprx
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -7,6 +7,7 @@
 #include <stai/stai.h>
 
 static const uint32_t SceHttp_library_nid = 0xE8F15CDE;
+static const uint32_t SceSsl_library_nid = 0xCAF5F2E9;
 static const char custom_ca_dir[] = "ux0:data/ca/";
 
 #define LOG(fmt, ...) sceClibPrintf("[libssl-custom-ca] " fmt, ##__VA_ARGS__)
@@ -75,12 +76,35 @@ void load_ca_certs() {
     sceIoDclose(dfd);
 }
 
+#define HTTP_LOADED (1 << 1)
+#define SSL_LOADED (1 << 2)
+static uint32_t loaded = 0;
+
+static inline int http_and_ssl_loaded() {
+    return (loaded & HTTP_LOADED) && (loaded & SSL_LOADED);
+}
+
 STAI_HOOK(int, sceHttpInit, unsigned int poolSize) {
     int ret = STAI_HOOK_CONTINUE(sceHttpInit, poolSize);
     if(ret < 0) {
         return ret;
     }
-    load_ca_certs();
+    loaded |= HTTP_LOADED;
+    if(http_and_ssl_loaded()) {
+        load_ca_certs();
+    }
+    return ret;
+}
+
+STAI_HOOK(int, sceSslInit, unsigned int poolSize) {
+    int ret = STAI_HOOK_CONTINUE(sceSslInit, poolSize);
+    if(ret < 0) {
+        return ret;
+    }
+    loaded |= SSL_LOADED;
+    if(http_and_ssl_loaded()) {
+        load_ca_certs();
+    }
     return ret;
 }
 
@@ -101,9 +125,28 @@ STAI_HOOK(int, SceHttp_module_start, SceSize argc, void* argv) {
     return SCE_KERNEL_START_SUCCESS;
 }
 
+STAI_HOOK(int, SceSsl_module_start, SceSize argc, void* argv) {
+    int ret = STAI_HOOK_CONTINUE(SceSsl_module_start, argc, argv);
+    if(ret != SCE_KERNEL_START_SUCCESS) {
+        return ret;
+    }
+    SceUID module_uid = module_uid_by_library_nid(SceSsl_library_nid);
+    if(module_uid < 0) {
+        LOG("module_uid_by_library_nid: %08x\n", module_uid);
+        return SCE_KERNEL_START_SUCCESS;
+    }
+    ret = staiHookExport(module_uid, SceSsl_library_nid, 0x3C733316, sceSslInit_hook, &sceSslInit_hook_ref);
+    if(ret < 0) {
+        LOG("staiHookExport(sceSslInit): %08x\n", ret);
+    }
+    return SCE_KERNEL_START_SUCCESS;
+}
+
 int module_start(SceSize argc, void* argv) {
     int ret = staiHookModuleStart(SceHttp_library_nid, SceHttp_module_start_hook, &SceHttp_module_start_hook_ref);
     LOG("staiHookModuleStart(SceHttp): %08x\n", ret);
+    ret = staiHookModuleStart(SceSsl_library_nid, SceSsl_module_start_hook, &SceSsl_module_start_hook_ref);
+    LOG("staiHookModuleStart(SceSsl): %08x\n", ret);
     return SCE_KERNEL_START_SUCCESS;
 }
 
