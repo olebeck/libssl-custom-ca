@@ -31,8 +31,7 @@ jobs:
 
       - name: Install stai
         run: |
-          wget https://github.com/olebeck/stai/releases/download/v0.9.0/stai-0.0.1-1-vita.pkg.tar.xz
-          vdpm pacman --noconfirm -U ./stai-0.0.1-1-vita.pkg.tar.xz
+          vdpm pacman --noconfirm -U https://github.com/olebeck/stai/releases/download/v0.9.0/stai-0.0.1-1-vita.pkg.tar.xz
 
       - name: Build
         run: |
